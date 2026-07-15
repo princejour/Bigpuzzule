@@ -9,7 +9,20 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Scaffold
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,27 +30,32 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.theme.MyApplicationTheme
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,10 +70,7 @@ data class CellState(
     val x: Int,
     val y: Int,
     val direction: Direction? = null,
-    val isDot: Boolean = false,
-    val isAnimatingOut: Boolean = false,
-    val translationX: Float = 0f,
-    val translationY: Float = 0f
+    val isDot: Boolean = true
 )
 
 class GameViewModel : ViewModel() {
@@ -63,119 +78,101 @@ class GameViewModel : ViewModel() {
     val grid: StateFlow<List<CellState>> = _grid.asStateFlow()
 
     private val _level = MutableStateFlow(1)
-    val level = _level.asStateFlow()
-    
+    val level: StateFlow<Int> = _level.asStateFlow()
+
     private val _moves = MutableStateFlow(0)
-    val moves = _moves.asStateFlow()
+    val moves: StateFlow<Int> = _moves.asStateFlow()
 
     init {
-        generateLevel()
+        restartLevel()
     }
 
-    fun generateLevel() {
+    fun restartLevel() {
         _moves.value = 0
-        val size = 5
-        // Start with empty board
-        val board = Array(size) { Array(size) { CellState(0, 0, 0) } }
-        for (y in 0 until size) {
-            for (x in 0 until size) {
-                board[y][x] = CellState(id = y * size + x, x = x, y = y, isDot = true) // start all as dots
-            }
-        }
-
-        // Generate backwards: place arrows that can "fly in" from the edges.
-        // Or simpler: generate random arrows and see if it's solvable. If not, retry.
-        // Actually, reverse generation is 100% reliable.
-        val arrowPositions = mutableListOf<CellState>()
-        
-        // We will place 20 arrows.
-        val targetArrows = 20
-        var attempts = 0
-        while (arrowPositions.size < targetArrows && attempts < 1000) {
-            attempts++
-            // Pick a random spot that is a dot (meaning empty in reverse generation)
-            val x = Random.nextInt(size)
-            val y = Random.nextInt(size)
-            if (!board[y][x].isDot) continue // already an arrow
-
-            // Check which directions are "clear" to the edge for it to have flown IN from
-            // Since it's reverse, "flying in" means it came from the edge to this spot, so the path to the edge in the OPPOSITE direction of the arrow must be clear.
-            // Wait, if an arrow is pointing UP, it flies UP. In reverse, it comes from UP and lands here. So the path UP must be clear of arrows.
-            // So we check if the path UP is clear of arrows. If so, we can place an UP arrow.
-            val possibleDirs = Direction.values().filter { dir ->
-                var clear = true
-                var cx = x
-                var cy = y
-                while (true) {
-                    when (dir) {
-                        Direction.UP -> cy--
-                        Direction.DOWN -> cy++
-                        Direction.LEFT -> cx--
-                        Direction.RIGHT -> cx++
-                    }
-                    if (cx !in 0 until size || cy !in 0 until size) break
-                    if (!board[cy][cx].isDot) {
-                        clear = false
-                        break
-                    }
-                }
-                clear
-            }
-
-            if (possibleDirs.isNotEmpty()) {
-                val chosenDir = possibleDirs.random()
-                board[y][x] = board[y][x].copy(isDot = false, direction = chosenDir)
-                arrowPositions.add(board[y][x])
-            }
-        }
-
-        _grid.value = board.flatten()
-        _level.update { it + 1 }
+        _grid.value = createSolvableBoard()
     }
 
-    fun onCellClicked(cell: CellState, onAnimate: suspend (CellState, Float, Float) -> Unit) {
-        if (cell.isDot || cell.direction == null || cell.isAnimatingOut) return
+    fun removeCell(cell: CellState) {
+        if (cell.direction == null || isBlocked(cell, _grid.value)) return
 
-        val size = 5
-        var cx = cell.x
-        var cy = cell.y
-        var blocked = false
+        val updatedGrid = _grid.value.map { current ->
+            if (current.id == cell.id) {
+                current.copy(direction = null, isDot = true)
+            } else {
+                current
+            }
+        }
+
+        _moves.update { it + 1 }
+
+        if (updatedGrid.none { it.direction != null }) {
+            _level.update { it + 1 }
+            _moves.value = 0
+            _grid.value = createSolvableBoard()
+        } else {
+            _grid.value = updatedGrid
+        }
+    }
+
+    private fun createSolvableBoard(): List<CellState> {
+        val board = Array(GRID_SIZE) { y ->
+            Array(GRID_SIZE) { x ->
+                CellState(id = y * GRID_SIZE + x, x = x, y = y)
+            }
+        }
+
+        var arrowsPlaced = 0
+        var attempts = 0
+
+        while (arrowsPlaced < TARGET_ARROWS && attempts < MAX_GENERATION_ATTEMPTS) {
+            attempts++
+            val x = Random.nextInt(GRID_SIZE)
+            val y = Random.nextInt(GRID_SIZE)
+
+            if (board[y][x].direction != null) continue
+
+            val possibleDirections = Direction.values().filter { direction ->
+                pathToEdgeIsClear(x, y, direction, board)
+            }
+
+            if (possibleDirections.isNotEmpty()) {
+                board[y][x] = board[y][x].copy(
+                    direction = possibleDirections.random(),
+                    isDot = false
+                )
+                arrowsPlaced++
+            }
+        }
+
+        return board.flatten()
+    }
+
+    private fun pathToEdgeIsClear(
+        startX: Int,
+        startY: Int,
+        direction: Direction,
+        board: Array<Array<CellState>>
+    ): Boolean {
+        var x = startX
+        var y = startY
 
         while (true) {
-            when (cell.direction) {
-                Direction.UP -> cy--
-                Direction.DOWN -> cy++
-                Direction.LEFT -> cx--
-                Direction.RIGHT -> cx++
+            when (direction) {
+                Direction.UP -> y--
+                Direction.DOWN -> y++
+                Direction.LEFT -> x--
+                Direction.RIGHT -> x++
             }
-            if (cx !in 0 until size || cy !in 0 until size) break
-            
-            val checkCell = _grid.value.find { it.x == cx && it.y == cy }
-            if (checkCell != null && (checkCell.direction != null || checkCell.isDot)) {
-                blocked = true
-                break
-            }
-        }
 
-        if (!blocked) {
-            _moves.update { it + 1 }
-            // Launch animation from UI side, then update state
-        } else {
-            // Shake animation or just ignore
+            if (x !in 0 until GRID_SIZE || y !in 0 until GRID_SIZE) return true
+            if (board[y][x].direction != null) return false
         }
     }
-    
-    fun removeCell(cell: CellState) {
-        _grid.update { currentGrid ->
-            currentGrid.map {
-                if (it.id == cell.id) it.copy(direction = null, isDot = true) else it
-            }
-        }
-        
-        // Check win
-        if (_grid.value.none { it.direction != null }) {
-            generateLevel()
-        }
+
+    companion object {
+        const val GRID_SIZE = 5
+        private const val TARGET_ARROWS = 20
+        private const val MAX_GENERATION_ATTEMPTS = 2_000
     }
 }
 
@@ -183,15 +180,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             MyApplicationTheme {
+                val gameViewModel: GameViewModel = viewModel()
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     containerColor = MaterialTheme.colorScheme.background,
-                    topBar = { TopBar() },
+                    topBar = { TopBar(gameViewModel) },
                     bottomBar = { BottomBar() }
                 ) { innerPadding ->
-                    GameScreen(modifier = Modifier.padding(innerPadding))
+                    GameScreen(
+                        viewModel = gameViewModel,
+                        modifier = Modifier.padding(innerPadding)
+                    )
                 }
             }
         }
@@ -199,10 +202,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun TopBar() {
-    val viewModel: GameViewModel = viewModel()
-    val level by viewModel.level.collectAsState()
-    
+fun TopBar(viewModel: GameViewModel) {
+    val level by viewModel.level.collectAsStateWithLifecycle()
+    val moves by viewModel.moves.collectAsStateWithLifecycle()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -225,7 +228,9 @@ fun TopBar() {
                     fontSize = 16.sp
                 )
             }
+
             Spacer(modifier = Modifier.width(12.dp))
+
             Column {
                 Text(
                     text = "Level $level",
@@ -234,22 +239,22 @@ fun TopBar() {
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Medium Difficulty",
+                    text = "$moves moves",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
-        
+
         IconButton(
-            onClick = { viewModel.generateLevel() },
+            onClick = viewModel::restartLevel,
             modifier = Modifier
                 .size(44.dp)
                 .background(MaterialTheme.colorScheme.outlineVariant, CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Default.Refresh,
-                contentDescription = "Restart",
+                contentDescription = "Restart level",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -275,49 +280,64 @@ fun BottomBar() {
 }
 
 @Composable
-fun BottomNavButton(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, selected: Boolean) {
+fun BottomNavButton(icon: ImageVector, text: String, selected: Boolean) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.alpha(if (selected) 1f else 0.6f)
+        modifier = Modifier.graphicsLayer(alpha = if (selected) 1f else 0.6f)
     ) {
         Box(
             modifier = Modifier
                 .size(width = 48.dp, height = 32.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent),
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = text,
-                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
             )
         }
+
         Spacer(modifier = Modifier.height(4.dp))
+
         Text(
             text = text,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
-            color = if (selected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onSurfaceVariant
+            color = if (selected) {
+                MaterialTheme.colorScheme.onBackground
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
         )
     }
 }
 
-fun Modifier.alpha(alpha: Float) = this.graphicsLayer(alpha = alpha)
-
 @Composable
-fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel = viewModel()) {
-    val grid by viewModel.grid.collectAsState()
-    val scope = rememberCoroutineScope()
-    
+fun GameScreen(
+    viewModel: GameViewModel,
+    modifier: Modifier = Modifier
+) {
+    val grid by viewModel.grid.collectAsStateWithLifecycle()
+
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
-                .width(340.dp)
+                .fillMaxWidth()
+                .widthIn(max = 340.dp)
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(32.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
@@ -327,100 +347,125 @@ fun GameScreen(modifier: Modifier = Modifier, viewModel: GameViewModel = viewMod
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.SpaceEvenly
             ) {
-                for (y in 0 until 5) {
+                for (y in 0 until GameViewModel.GRID_SIZE) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        for (x in 0 until 5) {
-                            val cell = grid.find { it.x == x && it.y == y } ?: CellState(0,x,y,isDot = true)
-                            val isBlocked = checkBlocked(cell, grid)
+                        for (x in 0 until GameViewModel.GRID_SIZE) {
+                            val cell = grid.firstOrNull { it.x == x && it.y == y }
+                                ?: CellState(id = y * GameViewModel.GRID_SIZE + x, x = x, y = y)
+
                             CellView(
                                 cell = cell,
-                                isBlocked = isBlocked,
-                                onCellClicked = { 
-                                    if (!isBlocked && cell.direction != null) {
-                                        viewModel.removeCell(cell)
-                                    }
-                                }
+                                isBlocked = isBlocked(cell, grid),
+                                onCellRemoved = { viewModel.removeCell(cell) }
                             )
                         }
                     }
                 }
             }
         }
-        
+
         Spacer(modifier = Modifier.height(24.dp))
-        
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ActionButton(icon = Icons.Default.Refresh, text = "UNDO")
-            ActionButton(icon = Icons.Default.Settings, text = "HINT")
-        }
+
+        ActionButton(
+            icon = Icons.Default.Refresh,
+            text = "RESTART",
+            onClick = viewModel::restartLevel
+        )
     }
 }
 
-fun checkBlocked(cell: CellState, grid: List<CellState>): Boolean {
-    if (cell.direction == null) return true
-    var cx = cell.x
-    var cy = cell.y
-    while(true) {
-        when (cell.direction) {
-            Direction.UP -> cy--
-            Direction.DOWN -> cy++
-            Direction.LEFT -> cx--
-            Direction.RIGHT -> cx++
+fun isBlocked(cell: CellState, grid: List<CellState>): Boolean {
+    val direction = cell.direction ?: return true
+    var x = cell.x
+    var y = cell.y
+
+    while (true) {
+        when (direction) {
+            Direction.UP -> y--
+            Direction.DOWN -> y++
+            Direction.LEFT -> x--
+            Direction.RIGHT -> x++
         }
-        if (cx !in 0 until 5 || cy !in 0 until 5) break
-        val checkCell = grid.find { it.x == cx && it.y == cy }
-        if (checkCell != null && (checkCell.direction != null || checkCell.isDot)) {
-            return true
+
+        if (x !in 0 until GameViewModel.GRID_SIZE || y !in 0 until GameViewModel.GRID_SIZE) {
+            return false
         }
+
+        val cellInPath = grid.firstOrNull { it.x == x && it.y == y }
+        if (cellInPath?.direction != null) return true
     }
-    return false
 }
 
 @Composable
-fun CellView(cell: CellState, onCellClicked: (Boolean) -> Unit, isBlocked: Boolean) {
-    val offset = remember { Animatable(0f) }
+fun CellView(
+    cell: CellState,
+    isBlocked: Boolean,
+    onCellRemoved: () -> Unit
+) {
+    val offset = remember(cell.id, cell.direction) { Animatable(0f) }
     val scope = rememberCoroutineScope()
-    
+
     Box(
         modifier = Modifier
             .size(56.dp)
             .graphicsLayer {
-                translationX = if (cell.direction == Direction.LEFT) -offset.value else if (cell.direction == Direction.RIGHT) offset.value else 0f
-                translationY = if (cell.direction == Direction.UP) -offset.value else if (cell.direction == Direction.DOWN) offset.value else 0f
+                translationX = when (cell.direction) {
+                    Direction.LEFT -> -offset.value
+                    Direction.RIGHT -> offset.value
+                    else -> 0f
+                }
+                translationY = when (cell.direction) {
+                    Direction.UP -> -offset.value
+                    Direction.DOWN -> offset.value
+                    else -> 0f
+                }
             }
             .clip(RoundedCornerShape(16.dp))
-            .background(if (cell.direction != null) MaterialTheme.colorScheme.surface else if (cell.isDot) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .background(
+                when {
+                    cell.direction != null -> MaterialTheme.colorScheme.surface
+                    cell.isDot -> MaterialTheme.colorScheme.primaryContainer
+                    else -> Color.Transparent
+                }
+            )
             .clickable(enabled = cell.direction != null) {
-                if (isBlocked) {
-                    scope.launch {
+                scope.launch {
+                    if (isBlocked) {
                         offset.animateTo(15f, tween(100))
                         offset.animateTo(-15f, tween(100))
                         offset.animateTo(0f, tween(100))
-                    }
-                } else {
-                    scope.launch {
-                        offset.animateTo(1000f, tween(500))
-                        onCellClicked(false)
-                        offset.snapTo(0f)
+                    } else {
+                        offset.animateTo(1_000f, tween(350))
+                        onCellRemoved()
                     }
                 }
             },
         contentAlignment = Alignment.Center
     ) {
         if (cell.direction != null) {
-            Box(modifier = Modifier.fillMaxSize().shadow(2.dp, RoundedCornerShape(16.dp), spotColor = Color.Black.copy(alpha = 0.1f)))
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .shadow(
+                        elevation = 2.dp,
+                        shape = RoundedCornerShape(16.dp),
+                        spotColor = Color.Black.copy(alpha = 0.1f)
+                    )
+            )
+
             val icon = when (cell.direction) {
                 Direction.UP -> Icons.Default.ArrowUpward
                 Direction.DOWN -> Icons.Default.ArrowDownward
                 Direction.LEFT -> Icons.AutoMirrored.Filled.ArrowBack
                 Direction.RIGHT -> Icons.AutoMirrored.Filled.ArrowForward
             }
+
             Icon(
                 imageVector = icon,
-                contentDescription = null,
+                contentDescription = "Arrow ${cell.direction.name.lowercase()}",
                 tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(28.dp)
             )
@@ -436,14 +481,18 @@ fun CellView(cell: CellState, onCellClicked: (Boolean) -> Unit, isBlocked: Boole
 }
 
 @Composable
-fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
+fun ActionButton(
+    icon: ImageVector,
+    text: String,
+    onClick: () -> Unit
+) {
     Column(
         modifier = Modifier
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp))
-            .clickable { }
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp)
-            .width(60.dp),
+            .width(72.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
@@ -459,13 +508,15 @@ fun ActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, text: St
                 tint = MaterialTheme.colorScheme.onPrimaryContainer
             )
         }
+
         Spacer(modifier = Modifier.height(4.dp))
+
         Text(
             text = text,
-            fontSize = 10.sp,
+            fontSize = 9.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
-            letterSpacing = 1.sp
+            letterSpacing = 0.5.sp
         )
     }
 }
