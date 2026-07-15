@@ -1,21 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Arrow Puzzle
 
-# Run and deploy your AI Studio app
+A lightweight Android puzzle game built with Kotlin and Jetpack Compose.
 
-This contains everything you need to run your app locally.
+في هذه اللعبة، يزيل اللاعب الأسهم من اللوحة وفق اتجاه كل سهم. لا يمكن إزالة السهم إذا كان سهم آخر يعترض طريقه. بعد إزالة جميع الأسهم ينتقل اللاعب تلقائيًا إلى المستوى التالي.
 
-View your app in AI Studio: https://ai.studio/apps/7299fe70-b04e-4340-9bd8-fa65d9e231e2
+## Features
 
-## Run Locally
+- Solvable 5×5 puzzle boards generated automatically
+- Animated arrow movement and blocked-move feedback
+- Level and move counters
+- Restart button that keeps the current level number
+- Responsive Jetpack Compose interface
+- Offline operation with no account, analytics, advertisements, or network access
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+## Technology
 
+- Kotlin
+- Jetpack Compose
+- Material 3
+- Android Architecture Components (`ViewModel` and `StateFlow`)
+- Minimum Android version: Android 7.0 / API 24
+- Target SDK: API 36
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+## Run the project
+
+### Android Studio
+
+1. Install a recent stable version of Android Studio with JDK 17.
+2. Clone or download this repository.
+3. Open the repository folder in Android Studio.
+4. Allow Gradle sync to finish and install Android SDK 36 when prompted.
+5. Run the `app` configuration on an emulator or Android device.
+
+The app does not require a Gemini key, Firebase configuration, or a `google-services.json` file.
+
+## Build a debug APK
+
+From Android Studio, select:
+
+`Build` → `Build App Bundle(s) / APK(s)` → `Build APK(s)`
+
+The generated file is normally located at:
+
+`app/build/outputs/apk/debug/app-debug.apk`
+
+## Project structure
+
+- `app/src/main/java/com/example/MainActivity.kt` — game state, puzzle generation, and Compose UI
+- `app/src/main/java/com/example/ui/theme/` — app colors and typography
+- `app/src/main/res/` — Android resources and launcher icons
+- `PRIVACY_POLICY.md` — privacy policy for users and app-store listings
+
+## Privacy
+
+Arrow Puzzle works offline and does not collect personal information. Read the full [Privacy Policy](PRIVACY_POLICY.md).
+
+## License
+
+No open-source license has been assigned yet. All rights are reserved unless the repository owner adds a license file.
